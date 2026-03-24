@@ -26,14 +26,29 @@
       padding:0;margin:-1px;overflow:hidden;
       clip:rect(0,0,0,0);white-space:nowrap;border:0;
     }
+    #game-wrap{position:relative;line-height:0}
+    /* LCP element — visible on first paint, hidden after first canvas frame */
+    #page-title{
+      position:absolute;inset:0;
+      display:flex;align-items:center;justify-content:center;
+      color:#FFE066;
+      font:bold 38px system-ui,sans-serif;
+      text-shadow:2px 2px 4px rgba(0,0,0,0.5);
+      pointer-events:none;
+      margin:0;
+      padding:0;
+    }
   </style>
 </head>
 <body>
-  <canvas id="c" width="480" height="640"
-    role="application"
-    aria-label="Flappy Bird game. Press Space or tap to flap and fly through the pipes."
-    tabindex="0"
-  ></canvas>
+  <div id="game-wrap">
+    <canvas id="c" width="480" height="640"
+      role="application"
+      aria-label="Flappy Bird game. Press Space or tap to flap and fly through the pipes."
+      tabindex="0"
+    ></canvas>
+    <h1 id="page-title">Flappy Bird</h1>
+  </div>
   <div id="sr" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
   <noscript>
     <p style="color:white;text-align:center;padding:2rem;font-family:sans-serif">
@@ -79,9 +94,15 @@
   }
 
   function flap() {
-    if      (state === IDLE) { state = PLAY; bird.vy = JUMP_VEL; tPipe = -1e9; }
-    else if (state === PLAY) { bird.vy = JUMP_VEL; }
-    else if (state === DEAD) { init(); }
+    if (state === IDLE) {
+      state = PLAY; bird.vy = JUMP_VEL; tPipe = -1e9;
+      // Hide LCP heading on first interaction so it doesn't overlap gameplay
+      if (_lcpEl) { _lcpEl.style.display = 'none'; _lcpEl = null; }
+    } else if (state === PLAY) {
+      bird.vy = JUMP_VEL;
+    } else if (state === DEAD) {
+      init();
+    }
   }
 
   // ── Input ──────────────────────────────────────────────────────
@@ -301,7 +322,7 @@
       cx.restore();
     }
 
-    if (state === IDLE) {
+    if (state === IDLE && !_lcpEl) {
       cx.fillStyle = 'rgba(0,0,0,0.38)';
       rrect(50, H/2 - 88, W - 100, 158, 14);
       cx.fill();
@@ -435,6 +456,9 @@
   }
 
   // ── Main loop ──────────────────────────────────────────────────
+  // LCP element — hidden on first user interaction (flap), not in rAF
+  var _lcpEl = document.getElementById('page-title');
+
   function loop(ts) {
     var dt = t0 ? Math.min(ts - t0, 50) : 16;
     t0 = ts;

@@ -1,90 +1,139 @@
 #!/usr/bin/env node
 /**
  * Lighthouse evaluator for Flappy Bird
- * Serves the game on port 3000, runs Lighthouse headless,
- * exits 0 if composite score >= 95, else exits 1.
+ * Uses Lighthouse Node API directly.
+ * Exits 0 if composite score (perf+a11y+best-practices)/3 >= 95, else exits 1.
  */
 
-const { execSync, spawn } = require('child_process');
+'use strict';
+
 const http = require('http');
-const fs = require('fs');
+const fs   = require('fs');
 const path = require('path');
 
-const PORT = 3000;
+const PORT         = 3000;
 const TARGET_SCORE = 95;
 
-// Simple static file server
+// ── Simple static file server ──────────────────────────────────
 function startServer() {
+  const MIME = {
+    '.html': 'text/html',
+    '.js':   'application/javascript',
+    '.css':  'text/css',
+    '.json': 'application/json',
+    '.png':  'image/png',
+    '.svg':  'image/svg+xml',
+    '.ico':  'image/x-icon',
+  };
+
   const server = http.createServer((req, res) => {
-    let filePath = path.join(process.cwd(), req.url === '/' ? 'index.html' : req.url);
-    // Security: stay within cwd
+    const safePath = path.normalize(req.url.split('?')[0]);
+    const rel      = (safePath === '/' || safePath === path.sep) ? 'index.html' : safePath.replace(/^[\\/]/, '');
+    const filePath = path.join(process.cwd(), rel);
+
     if (!filePath.startsWith(process.cwd())) {
-      res.writeHead(403); res.end(); return;
+      res.writeHead(403); res.end('Forbidden'); return;
     }
+
     fs.readFile(filePath, (err, data) => {
       if (err) { res.writeHead(404); res.end('Not found'); return; }
-      const ext = path.extname(filePath).toLowerCase();
-      const mime = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml' }[ext] || 'application/octet-stream';
+      const ext  = path.extname(filePath).toLowerCase();
+      const mime = MIME[ext] || 'application/octet-stream';
       res.writeHead(200, { 'Content-Type': mime });
       res.end(data);
     });
   });
+
   return new Promise((resolve, reject) => {
     server.listen(PORT, '127.0.0.1', () => resolve(server));
     server.on('error', reject);
   });
 }
 
-async function runLighthouse() {
-  // Check index.html exists
+// ── Main ───────────────────────────────────────────────────────
+async function run() {
   if (!fs.existsSync(path.join(process.cwd(), 'index.html'))) {
     console.error('ERROR: index.html not found in', process.cwd());
     process.exit(1);
   }
 
   let server;
+  let chrome;
+
   try {
     server = await startServer();
-    console.log(`Server started on http://localhost:${PORT}`);
+    console.log('Server started on http://localhost:' + PORT);
 
-    // Run Lighthouse
-    const outFile = path.join(process.cwd(), '.omc', 'lighthouse-report.json');
-    fs.mkdirSync(path.dirname(outFile), { recursive: true });
+    const { default: lighthouse }      = await import('lighthouse');
+    const { launch }                   = await import('chrome-launcher');
 
-    console.log('Running Lighthouse...');
+    console.log('Launching Chrome headless...');
+    chrome = await launch({
+      chromeFlags: ['--headless', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
+    });
+
+    console.log('Running Lighthouse (port ' + chrome.port + ')...');
+
+    let lhResult;
     try {
-      execSync(
-        `npx --yes lighthouse http://localhost:${PORT} --output=json --output-path="${outFile}" --chrome-flags="--headless --no-sandbox --disable-gpu" --quiet`,
-        { stdio: 'pipe', timeout: 120000 }
-      );
-    } catch (e) {
-      // Lighthouse may exit non-zero even on success — check the file
-      if (!fs.existsSync(outFile)) {
-        console.error('Lighthouse failed to produce output:', e.message);
-        process.exit(1);
+      lhResult = await lighthouse('http://localhost:' + PORT, {
+        logLevel:       'error',
+        output:         'json',
+        port:           chrome.port,
+        onlyCategories: ['performance', 'accessibility', 'best-practices'],
+      });
+    } catch (lhErr) {
+      // On Windows, Lighthouse sometimes throws EPERM during temp-dir cleanup
+      // even after successfully completing the audit.  If we have a partial
+      // result object attached to the error, use it.
+      const isCleanup = lhErr.code === 'EPERM' || lhErr.code === 'EBUSY' ||
+                        (lhErr.message && lhErr.message.includes('lighthouse.'));
+      if (isCleanup) {
+        console.warn('Warning: Windows temp-dir cleanup error (non-fatal):', lhErr.code || lhErr.message);
+        lhResult = lhErr.lhr ? { lhr: lhErr.lhr } : null;
+      } else {
+        throw lhErr;
       }
     }
 
-    const report = JSON.parse(fs.readFileSync(outFile, 'utf8'));
-    const perf = report.categories.performance.score * 100;
-    const a11y = report.categories.accessibility.score * 100;
-    const bp = report.categories['best-practices'].score * 100;
-    const composite = Math.round((perf + a11y + bp) / 3);
+    // Kill Chrome
+    try { await chrome.kill(); } catch (_) { /* ignore kill errors */ }
+    chrome = null;
 
-    console.log(`\n=== Lighthouse Results ===`);
-    console.log(`Performance:     ${Math.round(perf)}`);
-    console.log(`Accessibility:   ${Math.round(a11y)}`);
-    console.log(`Best Practices:  ${Math.round(bp)}`);
-    console.log(`Composite Score: ${composite} (target: ${TARGET_SCORE}+)`);
-    console.log(`Result: ${composite >= TARGET_SCORE ? 'PASS ✓' : 'FAIL ✗'}`);
+    if (!lhResult || !lhResult.lhr) {
+      console.error('ERROR: Lighthouse did not return results');
+      process.exit(1);
+    }
 
-    process.exit(composite >= TARGET_SCORE ? 0 : 1);
+    const cats = lhResult.lhr.categories;
+    const perf = Math.round(cats.performance['score']       * 100);
+    const a11y = Math.round(cats.accessibility['score']     * 100);
+    const bp   = Math.round(cats['best-practices']['score'] * 100);
+    const comp = Math.round((perf + a11y + bp) / 3);
+
+    // Save report
+    const outDir = path.join(process.cwd(), '.omc');
+    fs.mkdirSync(outDir, { recursive: true });
+    try {
+      fs.writeFileSync(path.join(outDir, 'lighthouse-report.json'), lhResult.report || JSON.stringify(lhResult.lhr));
+    } catch (_) { /* non-fatal */ }
+
+    console.log('\n=== Lighthouse Results ===');
+    console.log('Performance:    ', perf);
+    console.log('Accessibility:  ', a11y);
+    console.log('Best Practices: ', bp);
+    console.log('Composite:      ', comp, '(target: ' + TARGET_SCORE + '+)');
+    console.log('Result:', comp >= TARGET_SCORE ? 'PASS ✓' : 'FAIL ✗ (need ' + (TARGET_SCORE - comp) + ' more points)');
+
+    process.exit(comp >= TARGET_SCORE ? 0 : 1);
+
+  } catch (err) {
+    console.error('Evaluator error:', err.message || err);
+    process.exit(1);
   } finally {
-    if (server) server.close();
+    if (chrome) { try { await chrome.kill(); } catch (_) { /* ignore */ } }
+    if (server)  server.close();
   }
 }
 
-runLighthouse().catch(err => {
-  console.error('Evaluator error:', err);
-  process.exit(1);
-});
+run();
