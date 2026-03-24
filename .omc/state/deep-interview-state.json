@@ -1,0 +1,13 @@
+{
+  "active": false,
+  "current_phase": "complete",
+  "completed_at": "2026-03-24T00:00:00Z",
+  "final_score": "100",
+  "status": "goal_achieved",
+  "_meta": {
+    "mode": "deep-interview",
+    "sessionId": null,
+    "updatedAt": "2026-03-24T15:32:12.563Z",
+    "updatedBy": "state_write_tool"
+  }
+}

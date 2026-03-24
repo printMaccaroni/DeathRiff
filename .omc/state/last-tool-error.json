@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd \\\"D:/Project ADA\\\" && node eval.js 2>&1\",\"timeout\":180000,\"description\":\"Run Lighthouse evaluation with EPERM fix\"}",
+  "error": "Exit code 1\nServer started on http://localhost:3000\nLaunching Chrome headless...\nRunning Lighthouse (port 50241)...\nLanternError: NO_LCP\n    at LargestContentfulPaint.getOptimisticGraph (file:///D:/Project%20ADA/node_modules/@paulirish/trace_engine/models/trace/lantern/metrics/LargestContentfulPaint.js:30:19)\n    at LargestContentfulPaint.compute (file:///D:/Project%20ADA/node_modules/@paulirish/trace_engine/models/trace/lantern/metrics/Metric.js:46:38)\n    at LargestContentfulPaint.compute (fil...",
+  "timestamp": "2026-03-24T15:27:53.999Z",
+  "retry_count": 1
+}
