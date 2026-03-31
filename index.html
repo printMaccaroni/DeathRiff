@@ -12,7 +12,7 @@
     height: 100vh; overflow: hidden;
     font-family: 'Courier New', monospace;
   }
-  canvas { display: block; image-rendering: pixelated; cursor: none; }
+  canvas { display: block; image-rendering: pixelated; cursor: none; max-width: 100vw; max-height: 100vh; }
 </style>
 </head>
 <body>
@@ -23,7 +23,7 @@
 // CONFIG — All balance constants. Edit these to tune the game.
 // ================================================================
 const CFG = {
-  W: 900, H: 600,
+  W: 1200, H: 760,
 
   // Player base stats
   P_MAX_HP:       100,
@@ -1044,6 +1044,36 @@ class UI {
     ctx.fillText(lbl,x+s/2,y+s+10);
   }
 
+  drawTrial(ctx,g){
+    const W=CFG.W;
+    if(g.trialActive){
+      const t=g.trialTime, pct=g.trialKills/g.trialGoal;
+      const bx=W/2-130, by=CFG.H-88, bw=260, bh=38;
+      ctx.fillStyle='rgba(0,0,0,0.72)'; ctx.fillRect(bx,by,bw,bh);
+      const pulse=Math.sin(Date.now()/160)*0.3+0.7;
+      ctx.strokeStyle=`rgba(255,200,0,${pulse})`; ctx.lineWidth=2; ctx.strokeRect(bx,by,bw,bh);
+      ctx.fillStyle=`rgba(255,200,0,${pulse*0.35})`; ctx.fillRect(bx+1,by+1,Math.max(0,(bw-2)*pct),bh-2);
+      ctx.fillStyle='#ffe84a'; ctx.font='bold 11px "Courier New"'; ctx.textAlign='center';
+      ctx.fillText(`\u26A1 RIFF TRIAL \u2014 Kill ${g.trialKills}/${g.trialGoal} in ${Math.ceil(t)}s \u26A1`,W/2,by+15);
+      ctx.fillStyle='#ccaa55'; ctx.font='9px "Courier New"';
+      ctx.fillText('Reward: Overdrive + Bonus EXP',W/2,by+29);
+    } else if(g.trialResult==='success'&&g.trialResultT>0){
+      const a=Math.min(1,g.trialResultT);
+      ctx.save(); ctx.globalAlpha=a;
+      ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillRect(W/2-120,CFG.H-82,240,34);
+      ctx.fillStyle='#66ff88'; ctx.font='bold 14px "Courier New"'; ctx.textAlign='center';
+      ctx.fillText('\u26A1 RIFF TRIAL COMPLETE! \u26A1',W/2,CFG.H-59);
+      ctx.restore();
+    } else if(g.trialResult==='fail'&&g.trialResultT>0){
+      const a=Math.min(1,g.trialResultT);
+      ctx.save(); ctx.globalAlpha=a;
+      ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillRect(W/2-110,CFG.H-82,220,34);
+      ctx.fillStyle='#ff6655'; ctx.font='bold 14px "Courier New"'; ctx.textAlign='center';
+      ctx.fillText('TRIAL FAILED',W/2,CFG.H-59);
+      ctx.restore();
+    }
+  }
+
   drawCursor(ctx,mx,my,face){
     // Custom crosshair cursor
     ctx.save();
@@ -1131,6 +1161,83 @@ class UI {
 }
 
 // ================================================================
+// AUDIO ENGINE — Web Audio API procedural SFX
+// ================================================================
+class AudioEngine {
+  constructor(){ this._ctx=null; }
+  _ac(){
+    if(!this._ctx) this._ctx=new (window.AudioContext||window.webkitAudioContext)();
+    if(this._ctx.state==='suspended') this._ctx.resume();
+    return this._ctx;
+  }
+  _osc(freq,type,vol,t,dur,detune=0){
+    const ac=this._ac();
+    const o=ac.createOscillator(), g=ac.createGain();
+    o.type=type; o.frequency.value=freq; o.detune.value=detune;
+    g.gain.setValueAtTime(vol,t);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g); g.connect(ac.destination);
+    o.start(t); o.stop(t+dur);
+  }
+  _noise(vol,t,dur,freq=800,q=1){
+    const ac=this._ac();
+    const buf=ac.createBuffer(1,Math.ceil(ac.sampleRate*dur),ac.sampleRate);
+    const d=buf.getChannelData(0);
+    for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+    const src=ac.createBufferSource(), f=ac.createBiquadFilter(), g=ac.createGain();
+    src.buffer=buf; f.type='bandpass'; f.frequency.value=freq; f.Q.value=q;
+    g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    src.connect(f); f.connect(g); g.connect(ac.destination);
+    src.start(t); src.stop(t+dur);
+  }
+  swing(){
+    const ac=this._ac(),t=ac.currentTime;
+    this._osc(180,'sawtooth',0.12,t,0.08); this._noise(0.1,t,0.06,700,2);
+  }
+  skill1(){
+    const ac=this._ac(),t=ac.currentTime;
+    [110,220,330,440].forEach((f,i)=>this._osc(f,'sine',0.2,t+i*0.04,0.55));
+    this._noise(0.18,t,0.2,280,0.5);
+  }
+  skill2(){
+    const ac=this._ac(),t=ac.currentTime;
+    this._noise(0.35,t,0.32,1400,3); this._osc(75,'sawtooth',0.28,t,0.32);
+    this._osc(150,'sawtooth',0.14,t+0.05,0.26);
+  }
+  ult(){
+    const ac=this._ac(),t=ac.currentTime;
+    this._osc(50,'sine',0.4,t,1.4); this._osc(100,'sawtooth',0.2,t,0.9);
+    this._noise(0.28,t,0.5,190,0.3); this._osc(38,'sine',0.32,t+0.05,1.5,-22);
+  }
+  hit(){ const ac=this._ac(),t=ac.currentTime; this._noise(0.18,t,0.05,1100,6); }
+  kill(){
+    const ac=this._ac(),t=ac.currentTime;
+    this._osc(440,'sine',0.1,t,0.1); this._osc(660,'sine',0.07,t+0.04,0.09);
+  }
+  playerHit(){
+    const ac=this._ac(),t=ac.currentTime;
+    this._noise(0.38,t,0.2,380,1); this._osc(140,'sawtooth',0.18,t,0.16);
+  }
+  levelUp(){
+    const ac=this._ac(),t=ac.currentTime;
+    [330,440,550,660].forEach((f,i)=>this._osc(f,'sine',0.2,t+i*0.07,0.32));
+  }
+  trialStart(){
+    const ac=this._ac(),t=ac.currentTime;
+    [220,280,220].forEach((f,i)=>this._osc(f,'square',0.14,t+i*0.1,0.12));
+  }
+  trialComplete(){
+    const ac=this._ac(),t=ac.currentTime;
+    [330,440,550,660,880].forEach((f,i)=>this._osc(f,'sine',0.22,t+i*0.06,0.38));
+    this._noise(0.12,t,0.5,2200,2);
+  }
+  trialFail(){
+    const ac=this._ac(),t=ac.currentTime;
+    [300,220,160].forEach((f,i)=>this._osc(f,'sawtooth',0.18,t+i*0.1,0.2));
+  }
+}
+
+// ================================================================
 // GAME
 // ================================================================
 class Game {
@@ -1171,6 +1278,16 @@ class Game {
     // Shake
     this.shakeT=0; this.shakeMag=0;
     this.choices=[];
+    // Audio
+    if(!this.audio) this.audio=new AudioEngine();
+    // Riff Trial
+    this.trialTimer   = 30;
+    this.trialActive  = false;
+    this.trialKills   = 0;
+    this.trialGoal    = 0;
+    this.trialTime    = 0;
+    this.trialResult  = null; // 'success'|'fail'
+    this.trialResultT = 0;
   }
 
   _bind(){
@@ -1250,7 +1367,7 @@ class Game {
       e.update(dt,p);
       if(Math.hypot(e.x-p.x,e.y-p.y)<e.sz+15){
         const hit=p.hit(e.dmg);
-        if(hit){ this._shake(5,0.32); this._burst(p.x,p.y,'#ff4444',6); }
+        if(hit){ this._shake(5,0.32); this._burst(p.x,p.y,'#ff4444',6); this.audio.playerHit(); }
       }
       if(e.dead){ this._kill(e); this.enemies.splice(i,1); }
     }
@@ -1290,6 +1407,7 @@ class Game {
 
     this.shakeT=Math.max(0,this.shakeT-dt);
     this.wave.update(dt,this.time,this.enemies,(def,sc)=>this._spawn(def,sc));
+    this._updateTrial(dt);
     this.bg.update(dt);
 
     if(p.dead) this.state='dead';
@@ -1321,6 +1439,7 @@ class Game {
         e.kb(dx/dist,dy/dist,85);
       }
     }
+    this.audio.swing();
     for(let i=0;i<7;i++){
       const a=p.face+rnd(-arcH,arcH), r=rnd(p.swingR*0.35,p.swingR);
       const spd=rnd(38,90);
@@ -1338,6 +1457,7 @@ class Game {
     const od=p.odReady;
     if(od){ p.useOD(); this._shake(12,0.6); this._bigFlash(p.x,p.y,'#ffe84a',85); }
     else    this._shake(8,0.48);
+    this.audio.skill1();
     p.cd1=p.cd1Max();
     const pulses=CFG.S1_PULSES+this.s1Bonus+(od?CFG.OD_S1_PULSES:0);
     const radius=CFG.S1_BASE_R*p.aoeMult*(od?CFG.OD_S1_R_MULT:1);
@@ -1362,6 +1482,7 @@ class Game {
     const od=p.odReady;
     if(od){ p.useOD(); this._shake(16,0.75); }
     else   this._shake(10,0.55);
+    this.audio.skill2();
     p.cd2=p.cd2Max();
     // Aim direction = toward mouse
     const angle=Math.atan2(this.my-p.y, this.mx-p.x);
@@ -1384,6 +1505,7 @@ class Game {
     if(p.cdU>0) return;
     const od=p.odReady;
     if(od){ p.useOD(); this._shake(16,1.0); }
+    this.audio.ult();
     p.cdU=p.cdUMax();
     const dur=CFG.ULT_DURATION+this.ultDurBonus;
     const stats={
@@ -1445,6 +1567,7 @@ class Game {
     const isCrit=Math.random()<p.crit;
     const dmg=isCrit?base*p.critMult:base;
     enemy.hit(dmg, isBig||isCrit);
+    this.audio.hit();
     p.addOD(dmg*CFG.OD_PER_DMG*this.odRateMult);
     if(p.steal>0) p.heal(dmg*p.steal);
     this.dmgNums.push(new DmgNum(enemy.x+rnd(-12,12),enemy.y-enemy.sz-2,dmg,isCrit));
@@ -1463,9 +1586,11 @@ class Game {
 
   _kill(e){
     this.kills++;
+    if(this.trialActive) this.trialKills++;
     this.player.addOD(CFG.OD_PER_KILL*this.odRateMult);
     this.pickups.push(new Pickup(e.x,e.y,e.exp));
     this._burst(e.x,e.y,e.col,14);
+    this.audio.kill();
   }
 
   _gainExp(val){
@@ -1476,6 +1601,7 @@ class Game {
       this.level++;
       this.choices=this.upgSys.pick();
       this.state='levelup';
+      this.audio.levelUp();
     }
   }
 
@@ -1483,6 +1609,31 @@ class Game {
     if(i<0||i>=this.choices.length) return;
     this.choices[i].fn(this.player,this);
     this.state='playing'; this.choices=[]; this.hoverCard=-1;
+  }
+
+  _updateTrial(dt){
+    if(this.trialActive){
+      this.trialTime-=dt;
+      if(this.trialKills>=this.trialGoal){
+        this.trialActive=false; this.trialResult='success'; this.trialResultT=3;
+        this.player.odMeter=CFG.OD_MAX; this.player.odReady=true;
+        this._gainExp(Math.floor(this.expN*0.35));
+        this._shake(12,0.55);
+        this.audio.trialComplete();
+      } else if(this.trialTime<=0){
+        this.trialActive=false; this.trialResult='fail'; this.trialResultT=2.5;
+        this.audio.trialFail();
+      }
+    } else {
+      if(this.trialResultT>0){ this.trialResultT-=dt; } else { this.trialResult=null; }
+      this.trialTimer-=dt;
+      if(this.trialTimer<=0 && this.state==='playing'){
+        this.trialActive=true; this.trialKills=0;
+        this.trialGoal=10+Math.floor(this.level*1.5);
+        this.trialTime=22; this.trialTimer=90;
+        this.audio.trialStart();
+      }
+    }
   }
 
   _burst(x,y,col,n){
@@ -1533,6 +1684,7 @@ class Game {
     // HUD (no shake)
     if(this.state==='playing'||this.state==='paused')
       this.ui.drawHUD(ctx,this.player,this.level,this.exp,this.expN,this.time,this.kills);
+    if(this.state==='playing') this.ui.drawTrial(ctx,this);
     if(this.state==='paused')   this.ui.drawPause(ctx);
     if(this.state==='dead')     this.ui.drawDeath(ctx,this.level,this.kills,this.time);
     if(this.state==='levelup')  this.ui.drawLevelUp(ctx,this.choices,this.hoverCard);
