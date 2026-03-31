@@ -1164,7 +1164,9 @@ class UI {
 // AUDIO ENGINE — Web Audio API procedural SFX
 // ================================================================
 class AudioEngine {
-  constructor(){ this._ctx=null; }
+  constructor(){ this._ctx=null; this._s1v=Math.ceil(Math.random()*3); }
+  resetSkill1(){ this._s1v=Math.ceil(Math.random()*3); }
+  _playFile(src){ const a=new Audio(src); a.play().catch(()=>{}); }
   _ac(){
     if(!this._ctx) this._ctx=new (window.AudioContext||window.webkitAudioContext)();
     if(this._ctx.state==='suspended') this._ctx.resume();
@@ -1194,21 +1196,9 @@ class AudioEngine {
     const ac=this._ac(),t=ac.currentTime;
     this._osc(180,'sawtooth',0.12,t,0.08); this._noise(0.1,t,0.06,700,2);
   }
-  skill1(){
-    const ac=this._ac(),t=ac.currentTime;
-    [110,220,330,440].forEach((f,i)=>this._osc(f,'sine',0.2,t+i*0.04,0.55));
-    this._noise(0.18,t,0.2,280,0.5);
-  }
-  skill2(){
-    const ac=this._ac(),t=ac.currentTime;
-    this._noise(0.35,t,0.32,1400,3); this._osc(75,'sawtooth',0.28,t,0.32);
-    this._osc(150,'sawtooth',0.14,t+0.05,0.26);
-  }
-  ult(){
-    const ac=this._ac(),t=ac.currentTime;
-    this._osc(50,'sine',0.4,t,1.4); this._osc(100,'sawtooth',0.2,t,0.9);
-    this._noise(0.28,t,0.5,190,0.3); this._osc(38,'sine',0.32,t+0.05,1.5,-22);
-  }
+  skill1(){ this._playFile(`/audio/skill1_${this._s1v}.wav`); }
+  skill2(){ this._playFile('/audio/skill2.wav'); }
+  ult(){ this._playFile('/audio/ultimate.wav'); }
   hit(){ const ac=this._ac(),t=ac.currentTime; this._noise(0.18,t,0.05,1100,6); }
   kill(){
     const ac=this._ac(),t=ac.currentTime;
@@ -1343,7 +1333,7 @@ class Game {
     });
   }
 
-  _restart(){ this._init(); this.state='playing'; this._last=null; }
+  _restart(){ this._init(); this.audio.resetSkill1(); this.state='playing'; this._last=null; }
 
   _loop(ts){
     if(this._last===null) this._last=ts;
